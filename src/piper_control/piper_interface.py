@@ -132,6 +132,26 @@ def get_joint_limits(
   else:
     raise ValueError(f"Unknown Piper arm type: {arm_type}")
 
+def get_joint_max_speed(piper: piper_sdk.C_PiperInterface_V2) -> list[float]:
+  """Returns the max speed for all joints.
+
+  Args:
+      piper (C_PiperInterface_V2): The piper arm itself.
+
+  Returns:
+      list[float]: The list of the 6 max speed ordered for joint 1 to joint 6.
+  """
+
+  piper.SearchAllMotorMaxAngleSpd()
+  time.sleep(0.1)
+  max_speed = piper.GetAllMotorAngleLimitMaxSpd()
+  time.sleep(0.1)
+  max_speed.all_motor_angle_limit_max_spd.assign()
+
+  return [
+            max_speed.all_motor_angle_limit_max_spd.motor[i].max_joint_spd / 1000
+            for i in range(1, 7)
+          ]
 
 def get_gripper_angle_max(
     gripper_type: PiperGripperType = PiperGripperType.V2,
@@ -374,6 +394,10 @@ class PiperInterface:
     return get_joint_limits(self._piper_arm_type)
 
   @property
+  def joint_max_speeds(self) -> list[float]:
+    return get_joint_max_speed(self.piper)
+
+  @property
   def gripper_angle_max(self) -> float:
     """Returns the maximum gripper angle for the current Piper gripper type."""
     return get_gripper_angle_max(self._piper_gripper_type)
@@ -452,6 +476,23 @@ class PiperInterface:
     if self.move_mode == MoveMode.MIT:
       return ArmController.MIT
     return ArmController.POSITION_VELOCITY
+
+  def set_joint_max_speeds(self, max_speeds) -> None:
+    """Set the max speeds of each joint.
+    https://github.com/agilexrobotics/piper_sdk/blob/9208703debe09d02fbaca8c606bdd9f79aca243a/piper_sdk/demo/V2/V2_piper_ctrl_motor_max_spd.py
+
+    Args:
+        max_speeds (list[float]): The max speed of each individual joint
+        in rad/s. The speed must be < 3 rad/s.
+    """
+
+    assert len(max_speeds) == 6
+    for max_speed in max_speeds:
+      assert max_speed <= 3
+
+    for i, max_speed in enumerate(max_speeds):
+      self.piper.MotorMaxSpdSet(i + 1, int(max_speed * 1000))
+      time.sleep(0.1)
 
   def set_gripper_zero_position(self) -> None:
     """
