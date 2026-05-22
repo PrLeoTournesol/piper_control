@@ -132,6 +132,7 @@ def get_joint_limits(
   else:
     raise ValueError(f"Unknown Piper arm type: {arm_type}")
 
+
 def get_joint_max_speed(piper: piper_sdk.C_PiperInterface_V2) -> list[float]:
   """Returns the max speed for all joints.
 
@@ -149,9 +150,10 @@ def get_joint_max_speed(piper: piper_sdk.C_PiperInterface_V2) -> list[float]:
   max_speed.all_motor_angle_limit_max_spd.assign()
 
   return [
-            max_speed.all_motor_angle_limit_max_spd.motor[i].max_joint_spd / 1000
-            for i in range(1, 7)
-          ]
+      max_speed.all_motor_angle_limit_max_spd.motor[i].max_joint_spd / 1000
+      for i in range(1, 7)
+  ]
+
 
 def get_gripper_angle_max(
     gripper_type: PiperGripperType = PiperGripperType.V2,
