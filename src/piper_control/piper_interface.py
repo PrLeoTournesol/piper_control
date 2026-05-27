@@ -101,13 +101,13 @@ class PiperGripperType(enum.Enum):
 def get_joint_limits(
     arm_type: PiperArmType = PiperArmType.PIPER,
 ) -> dict[str, list[float]]:
-  """Returns the joint limits for the specified Piper arm type.
+  """Returns the default joint limits for the specified Piper arm type.
 
   Args:
     arm_type (PiperArmType): The type of Piper arm.
   Returns:
     dict[str, list[float]]: A dictionary with 'min' and 'max' keys containing
-    lists of joint limits in radians.
+    lists of default joint limits in radians.
   """
   if arm_type == PiperArmType.PIPER:
     return {
@@ -133,6 +133,47 @@ def get_joint_limits(
     raise ValueError(f"Unknown Piper arm type: {arm_type}")
 
 
+def get_current_joint_limits(
+    piper: piper_sdk.C_PiperInterface_V2,
+) -> dict[str, list[float]]:
+  """Returns the default joint limits for the specified Piper arm type.
+
+  Args:
+    arm_type (PiperArmType): The type of Piper arm.
+  Returns:
+    dict[str, list[float]]: A dictionary with 'min' and 'max' keys containing
+    lists of joint limits in radians.
+  """
+
+  piper.SearchAllMotorMaxAngleSpd()
+  time.sleep(0.1)
+  max_speed = piper.GetAllMotorAngleLimitMaxSpd()
+  time.sleep(0.1)
+  max_speed.all_motor_angle_limit_max_spd.assign()
+
+  angle_limits = {
+      "min": [],
+      "max": [],
+  }
+
+  for i in range(1, 7):
+    min_angle_i = (
+        max_speed.all_motor_angle_limit_max_spd.motor[i].min_angle_limit
+        * DEG_TO_RAD
+        / 10
+    )
+    max_angle_i = (
+        max_speed.all_motor_angle_limit_max_spd.motor[i].max_angle_limit
+        * DEG_TO_RAD
+        / 10
+    )
+
+    angle_limits["min"].append(min_angle_i)
+    angle_limits["max"].append(max_angle_i)
+
+  return angle_limits
+
+
 def get_joint_max_speed(piper: piper_sdk.C_PiperInterface_V2) -> list[float]:
   """Returns the max speed for all joints in rad/s.
 
@@ -150,9 +191,10 @@ def get_joint_max_speed(piper: piper_sdk.C_PiperInterface_V2) -> list[float]:
   max_speed.all_motor_angle_limit_max_spd.assign()
 
   return [
-      max_speed.all_motor_angle_limit_max_spd.motor[i].max_joint_spd / 1000
+      max_speed.all_motor_angle_limit_max_spd.motor[i].max_joint_spd / 100
       for i in range(1, 7)
   ]
+
 
 def get_joint_max_acc(piper: piper_sdk.C_PiperInterface_V2) -> list[float]:
   """Returns the max acceleration for all joints in rad/s^2.
@@ -161,7 +203,8 @@ def get_joint_max_acc(piper: piper_sdk.C_PiperInterface_V2) -> list[float]:
       piper (C_PiperInterface_V2): The piper arm itself.
 
   Returns:
-      list[float]: The list of the 6 max acceleration ordered for joint 1 to joint 6.
+      list[float]: The list of the 6 max acceleration ordered for joint 1
+      to joint 6.
   """
 
   piper.SearchAllMotorMaxAccLimit()
@@ -413,15 +456,22 @@ class PiperInterface:
 
   @property
   def joint_limits(self) -> dict[str, list[float]]:
-    """Returns the joint limits for the current Piper arm type."""
+    """Returns the default joint limits for the current Piper arm type."""
     return get_joint_limits(self._piper_arm_type)
 
   @property
+  def current_joint_limits(self) -> dict[str, list[float]]:
+    """Returns the set joint limits for the current Piper arm type."""
+    return get_current_joint_limits(self.piper)
+
+  @property
   def joint_max_speeds(self) -> list[float]:
+    """Returns the joint max speed for the current Piper arm."""
     return get_joint_max_speed(self.piper)
 
   @property
   def joint_max_accs(self) -> list[float]:
+    """Returns the joint max acceleration for the current Piper arm."""
     return get_joint_max_acc(self.piper)
 
   @property
@@ -504,6 +554,46 @@ class PiperInterface:
       return ArmController.MIT
     return ArmController.POSITION_VELOCITY
 
+  def set_default_joint_values(self) -> None:
+    """Set the default angle limits, speed and acceleration for all the joints.
+    https://github.com/agilexrobotics/piper_sdk/blob/master/piper_sdk/demo/V2/piper_set_init_default.py
+    """
+
+    self.piper.ArmParamEnquiryAndConfig(0x01, 0x02, 0, 0, 0x02)
+    time.sleep(1)
+
+  def set_joint_angle_limits(self, min_angles: list, max_angles: list) -> None:
+    """Set the max speeds of each joint.
+    https://github.com/agilexrobotics/piper_sdk/blob/master/piper_sdk/demo/V2/piper_set_motor_angle_limit.py
+
+    Args:
+        min_angles (list[float]): The min angle limits of each individual joint
+        in rad.
+        max_angles (list[float]): The max angle limits of each individual joint
+        in rad.
+    """
+
+    assert len(min_angles) == 6 and len(max_angles) == 6
+
+    for i in range(1, 7):
+      # Convert the angles to 0.1° unit
+      min_joint_i = min_angles[i - 1] * RAD_TO_DEG * 10
+      max_joint_i = max_angles[i - 1] * RAD_TO_DEG * 10
+      self.piper.MotorAngleLimitMaxSpdSet(i, min_joint_i, max_joint_i)
+
+  def set_joint_default_angle_limits(self) -> None:
+    """Set the angle limits of each joint to their default value.
+    https://github.com/agilexrobotics/piper_sdk/blob/master/piper_sdk/demo/V2/piper_set_motor_angle_limit.py
+    """
+
+    joint_limits = get_joint_limits(self._piper_arm_type)
+
+    for i in range(1, 7):
+      # Convert the angles to 0.1° unit
+      min_joint_i = joint_limits["min"][i - 1] * RAD_TO_DEG * 10
+      max_joint_i = joint_limits["max"][i - 1] * RAD_TO_DEG * 10
+      self.piper.MotorAngleLimitMaxSpdSet(i, min_joint_i, max_joint_i)
+
   def set_joint_max_speeds(self, max_speeds) -> None:
     """Set the max speeds of each joint.
     https://github.com/agilexrobotics/piper_sdk/blob/9208703debe09d02fbaca8c606bdd9f79aca243a/piper_sdk/demo/V2/V2_piper_ctrl_motor_max_spd.py
@@ -518,8 +608,10 @@ class PiperInterface:
       assert max_speed <= 3
 
     for i, max_speed in enumerate(max_speeds):
-      self.piper.MotorMaxSpdSet(i + 1, int(max_speed * 1000))
-      time.sleep(0.1)
+      # The sdk says the acceleration is in 0.001 rad/s unit but i think it is
+      # actually in 0.01 rad/s like the acceleration in 0.01 rad/s^2
+      self.piper.MotorMaxSpdSet(i + 1, int(max_speed * 100))
+      time.sleep(0.4)
 
   def set_joint_max_accs(self, max_accs) -> None:
     """Set the max acc of each joint.
@@ -536,7 +628,7 @@ class PiperInterface:
 
     for i, max_acc in enumerate(max_accs):
       self.piper.JointMaxAccConfig(i + 1, int(max_acc * 100))
-      time.sleep(0.1)
+      time.sleep(0.4)
 
   def set_gripper_zero_position(self) -> None:
     """
